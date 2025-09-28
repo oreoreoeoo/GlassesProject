@@ -34,25 +34,29 @@ def generate_mask(frame, threshold=15):
     _, mask = cv2.threshold(gray, threshold, 255, cv2.THRESH_BINARY)
     return mask
 
-def colorize_frame(frame, mask, color):
-    """给镜框上色"""
-    colored_layer = np.zeros_like(frame)
-    colored_layer[:] = color
-    return cv2.bitwise_and(colored_layer, colored_layer, mask=mask)
+def colorize_frame(frame, mask, color, alpha=0.5):
+    """给镜框整体上色（半透明混合）"""
+    color_layer = np.full_like(frame, color, dtype=np.uint8)
+    blended = cv2.addWeighted(frame, 1 - alpha, color_layer, alpha, 0)
+    mask_3ch = cv2.merge([mask, mask, mask])
+    return np.where(mask_3ch > 0, blended, frame)
 
-def apply_texture(frame, mask, texture_path, texture_color):
-    """给镜框添加花纹并着色"""
+def apply_texture(frame, mask, texture_path, texture_color, alpha=0.8):
+    """给镜框添加花纹（半透明混合）"""
     texture = cv2.imread(texture_path)
     texture = resize_image(texture, width=frame.shape[1])
 
     gray = cv2.cvtColor(texture, cv2.COLOR_BGR2GRAY)
     _, tex_mask = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
 
-    color_layer = np.zeros_like(texture)
-    color_layer[:] = texture_color
-    colored_texture = cv2.bitwise_and(color_layer, color_layer, mask=tex_mask)
+    color_layer = np.full_like(texture, texture_color, dtype=np.uint8)
+    blended_tex = cv2.addWeighted(texture, 1 - alpha, color_layer, alpha, 0)
 
-    return cv2.bitwise_and(colored_texture, colored_texture, mask=mask)
+    mask_3ch = cv2.merge([mask, mask, mask])
+    tex_mask_3ch = cv2.merge([tex_mask, tex_mask, tex_mask])
+
+    final_mask = cv2.bitwise_and(mask_3ch, tex_mask_3ch)
+    return np.where(final_mask > 0, blended_tex, np.zeros_like(frame))
 
 def combine_layers(base_frame, mask, color_layer, texture_layer):
     """合并颜色和花纹到新镜框"""
@@ -69,7 +73,7 @@ def main():
     base_frame = load_frame(frame_shapes[frame_choice])
     mask = generate_mask(base_frame)
 
-    # 2. 用户选择镜框颜色
+    # 2. 用户选择镜框颜色（透明度固定 0.5）
     print("\n请输入镜框整体颜色 (B,G,R)，例如红色(0,0,255)：")
     try:
         frame_color = tuple(map(int, input("镜框颜色: ").strip("()").split(",")))
@@ -77,9 +81,9 @@ def main():
         print("输入有误，使用默认红色 (0,0,255)")
         frame_color = (0, 0, 255)
 
-    color_layer = colorize_frame(base_frame, mask, frame_color)
+    color_layer = colorize_frame(base_frame, mask, frame_color, alpha=0.5)
 
-    # 3. 用户选择花纹及颜色
+    # 3. 用户选择花纹及颜色（透明度固定 0.8）
     print("\n请选择花纹：")
     print("1 - texture1.jpg")
     print("2 - texture2.jpg")
@@ -92,7 +96,7 @@ def main():
         print("输入有误，使用默认白色 (255,255,255)")
         texture_color = (255, 255, 255)
 
-    texture_layer = apply_texture(base_frame, mask, textures[texture_choice], texture_color)
+    texture_layer = apply_texture(base_frame, mask, textures[texture_choice], texture_color, alpha=0.9)
 
     # 4. 合并最终效果
     result = combine_layers(base_frame, mask, color_layer, texture_layer)
